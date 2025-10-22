@@ -1,3 +1,4 @@
+# signals.py (полностью измененный код)
 import telegram
 from monitor.logger import log
 from monitor.charts import create_chart
@@ -22,7 +23,7 @@ async def send_signal(symbol, df, info, config):
         else:
             icon, label = "⚪", "СИГНАЛ"
 
-        tradingview_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol.replace('/', '').replace(':', '')}.P"
+        tradingview_url = f"https://www.tradingview.com/chart/?symbol=BYBIT:{symbol.replace('/', '').replace(':', '')}.P"
 
         html = (
             f"<b>{icon} {label}</b> | <b>{tf_change:.2f}% на момент сигнала</b>\n"
