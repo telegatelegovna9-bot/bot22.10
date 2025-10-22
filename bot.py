@@ -1,3 +1,4 @@
+# bot.py (corrected version)
 import asyncio
 import sys
 import traceback
@@ -5,7 +6,7 @@ import telegram
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
-from monitor.fetcher import get_all_futures_tickers, fetch_ohlcv_binance
+from monitor.fetcher import get_all_futures_tickers, fetch_ohlcv_bybit
 from monitor.analyzer import analyze
 from monitor.logger import log
 from monitor.settings import load_config
@@ -33,12 +34,12 @@ async def run_monitor():
 
     try:
         log("Запуск мониторинга...")
-        start_time = asyncio.get_event_loop().time()  # Нововведение: измерение времени
+        start_time = asyncio.get_event_loop().time()
         if not cached_tickers or cached_tickers.get('timestamp', 0) + 300 < asyncio.get_event_loop().time():
             tickers = await get_all_futures_tickers()
             tickers = [t for t in tickers if not any(k in t.upper() for k in EXCLUDED_KEYWORDS)]
             cached_tickers = {'tickers': tickers, 'timestamp': asyncio.get_event_loop().time()}
-            log(f"Получено {len(tickers)} тикеров для обработки (обновлён кэш)", level="info")  # Возврат старого лога
+            log(f"Получено {len(tickers)} тикеров для обработки (обновлён кэш)", level="info")
         else:
             tickers = cached_tickers['tickers']
             log(f"Получено {len(tickers)} тикеров из кэша", level="info")
@@ -54,12 +55,12 @@ async def run_monitor():
             nonlocal total, signals
             async with semaphore:
                 await asyncio.sleep(0.1)
-                symbol_start_time = asyncio.get_event_loop().time()  # Нововведение: время для монеты
+                symbol_start_time = asyncio.get_event_loop().time()
                 try:
-                    log(f"Начало обработки {symbol}", level="info")  # Возврат детального лога
-                    df = await fetch_ohlcv_binance(symbol, config['timeframe'])
+                    log(f"Начало обработки {symbol}", level="info")
+                    df = await fetch_ohlcv_bybit(symbol, config['timeframe'])
                     if df.empty:
-                        log(f"{symbol} - пустой DataFrame после fetch_ohlcv_binance", level="warning")
+                        log(f"{symbol} - пустой DataFrame после fetch_ohlcv_bybit", level="warning")
                         return
                     is_signal, info = analyze(df, config, symbol=symbol)
                     total += 1
@@ -74,16 +75,16 @@ async def run_monitor():
                         else:
                             await send_confirmation(symbol, info, config, count_triggered, prev_count)
                     else:
-                        log(f"[{symbol}] Нет сигнала. {info.get('debug', 'Нет дополнительной информации')}", level="info")  # Возврат старого лога
+                        log(f"[{symbol}] Нет сигнала. {info.get('debug', 'Нет дополнительной информации')}", level="info")
                     symbol_end_time = asyncio.get_event_loop().time()
-                    log(f"Обработка {symbol} завершена за {symbol_end_time - symbol_start_time:.2f} сек", level="debug")  # Нововведение: время для монеты
+                    log(f"Обработка {symbol} завершена за {symbol_end_time - symbol_start_time:.2f} сек", level="debug")
                 except Exception as e:
                     log(f"Ошибка обработки {symbol}: {str(e)}", level="error")
 
         tasks = [process_symbol(symbol) for symbol in tickers]
         await asyncio.gather(*tasks)
         end_time = asyncio.get_event_loop().time()
-        log(f"Обработано {total} тикеров, сигналов: {signals}, время обработки: {end_time - start_time:.2f} сек", level="info")  # Возврат старого лога + нововведение
+        log(f"Обработано {total} тикеров, сигналов: {signals}, время обработки: {end_time - start_time:.2f} сек", level="info")
     except Exception as e:
         log(f"Ошибка в run_monitor: {str(e)} | Traceback: {traceback.format_exc()}", level="error")
 
@@ -117,16 +118,24 @@ async def reload_bot(app):
     scheduler.remove_all_jobs()
     await app.stop()
     await app.start()
-    config = load_config()  # Обновляем config после перезапуска
+    config = load_config()
     log("Бот перезапущен")
 
-if __name__ == '__main__':
+async def main():
     app = ApplicationBuilder().token(config['telegram_token']).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('test', test_telegram))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(toggle_indicator))
+
     scheduler.add_job(run_monitor, 'interval', seconds=60)
     scheduler.start()
     log("Бот запущен. Используй /start или /test в Telegram.")
-    app.run_polling(allowed_updates=['message', 'callback_query'])
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(allowed_updates=['message', 'callback_query'])
+    await asyncio.Event().wait()  # Keep the loop running
+
+if __name__ == '__main__':
+    asyncio.run(main())
